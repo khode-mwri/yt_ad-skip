@@ -6,6 +6,7 @@ const DEFAULTS = {
   translateSubs: true,
   showOriginal: false,
   dubVoice: false,
+  liveDub: false,
   fontSize: 22,
   skippedCount: 0,
   translatorEngine: "youtube"
@@ -21,7 +22,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (Object.keys(toSet).length) await chrome.storage.sync.set(toSet);
 });
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === "INCREMENT_SKIP") {
     chrome.storage.sync.get({ skippedCount: 0 }).then(({ skippedCount }) => {
       chrome.storage.sync.set({ skippedCount: skippedCount + 1 });
@@ -41,11 +42,90 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .catch((err) => sendResponse({ ok: false, error: String(err), cues: [] }));
     return true;
   }
+  if (msg?.type === "START_LIVE_DUB") {
+    startLiveDub(sender.tab && sender.tab.id).then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+  if (msg?.type === "STOP_LIVE_DUB") {
+    stopLiveDub().then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  if (msg?.type === "DUB_PAUSE") {
+    chrome.runtime.sendMessage({ type: "OFFSCREEN_PAUSE" }).catch(() => {});
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (msg?.type === "DUB_RESUME") {
+    chrome.runtime.sendMessage({ type: "OFFSCREEN_RESUME" }).catch(() => {});
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (msg?.type === "DUB_TEXT" || msg?.type === "DUB_STATUS") {
+    relayToYoutubeTabs(msg);
+    sendResponse({ ok: true });
+    return true;
+  }
 });
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync" || !changes.liveDub) return;
+  if (changes.liveDub.newValue) startLiveDub();
+  else stopLiveDub();
+});
+
+async function getYoutubeTabId(preferred) {
+  if (preferred) return preferred;
+  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const hit = tabs.find((t) => t.url && /youtube\.com/.test(t.url));
+  if (hit) return hit.id;
+  const all = await chrome.tabs.query({ url: ["https://www.youtube.com/*", "https://m.youtube.com/*"] });
+  return all[0] && all[0].id;
+}
+
+async function ensureOffscreen() {
+  if (!chrome.offscreen) throw new Error("offscreen_unsupported");
+  const exists = await chrome.offscreen.hasDocument?.();
+  if (exists) return;
+  await chrome.offscreen.createDocument({
+    url: "offscreen.html",
+    reasons: ["USER_MEDIA", "AUDIO_PLAYBACK"],
+    justification: "Capture YouTube tab audio and play Gemini live translation"
+  });
+}
+
+async function startLiveDub(tabId) {
+  const { geminiApiKey } = await chrome.storage.local.get({ geminiApiKey: "" });
+  const key = (geminiApiKey || "").trim();
+  if (!key) {
+    relayToYoutubeTabs({ type: "DUB_STATUS", text: "کلید Gemini را در پاپ‌آپ بگذار" });
+    return;
+  }
+  const id = await getYoutubeTabId(tabId);
+  if (!id) {
+    relayToYoutubeTabs({ type: "DUB_STATUS", text: "تب یوتیوب پیدا نشد" });
+    return;
+  }
+  await ensureOffscreen();
+  const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: id });
+  await chrome.runtime.sendMessage({ type: "OFFSCREEN_START", streamId, apiKey: key });
+}
+
+async function stopLiveDub() {
+  try { await chrome.runtime.sendMessage({ type: "OFFSCREEN_STOP" }); } catch (_) {}
+  try {
+    if (chrome.offscreen && (await chrome.offscreen.hasDocument?.())) await chrome.offscreen.closeDocument();
+  } catch (_) {}
+}
+
+function relayToYoutubeTabs(msg) {
+  chrome.tabs.query({ url: ["https://www.youtube.com/*", "https://m.youtube.com/*", "https://youtube.com/*"] }, (tabs) => {
+    (tabs || []).forEach((t) => chrome.tabs.sendMessage(t.id, msg).catch(() => {}));
+  });
+}
 
 function normalizeCaptionUrl(raw, fmt, tlang) {
   if (!raw) return "";
-  let s = String(raw).replace(/&amp;/g, "&").replace(/\\u0026/g, "&").trim();
+  let s = String(raw).replace(/&/g, "&").replace(/\\u0026/g, "&").trim();
   if (s.startsWith("//")) s = "https:" + s;
   if (s.startsWith("/")) s = "https://www.youtube.com" + s;
   let u;
@@ -71,7 +151,7 @@ function parseJson3(data) {
   return cues;
 }
 function decodeXml(s) {
-  return String(s || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return String(s || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">").replace(/"/g, '"').replace(/&#39;/g, "'").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 function parseSrv3(xml) {
   const cues = [];
