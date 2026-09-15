@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "یوتیوب فارسی — اسکیپ تبلیغ + مترجم",
   "short_name": "YT Farsi",
-  "version": "1.3.0",
-  "description": "اسکیپ خودکار تبلیغات یوتیوب و ترجمه فوری زیرنویس به فارسی",
+  "version": "1.4.0",
+  "description": "اسکیپ تبلیغ یوتیوب، زیرنویس فارسی و دوبله زنده با Gemini Live Translate",
   "default_locale": "fa",
   "icons": {
     "16": "icons/icon16.png",
@@ -20,7 +20,7 @@
       "48": "icons/icon48.png"
     }
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "tabCapture", "offscreen", "tabs"],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://m.youtube.com/*",
@@ -28,7 +28,8 @@
     "https://youtu.be/*",
     "https://*.googlevideo.com/*",
     "https://translate.googleapis.com/*",
-    "https://generativelanguage.googleapis.com/*"
+    "https://generativelanguage.googleapis.com/*",
+    "wss://generativelanguage.googleapis.com/*"
   ],
   "background": { "service_worker": "background.js" },
   "content_scripts": [{
