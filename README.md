@@ -4,6 +4,10 @@
 
 ریپو: https://github.com/khode-mwri/yt_ad-skip
 
+## دانلود زیپ
+- ریلیزها: https://github.com/khode-mwri/yt_ad-skip/releases
+- آخرین کد به صورت زیپ: https://github.com/khode-mwri/yt_ad-skip/archive/refs/heads/main.zip
+
 ## قابلیت‌ها
 - اسکیپ خودکار دکمه Skip یوتیوب
 - بی‌صدا و تند کردن تبلیغ غیرقابل‌اسکیپ (فقط وقتی پلیر کلاس `ad-showing` دارد)
@@ -11,9 +15,9 @@
 - اگر کلید Gemini نباشد، از Google Translate استفاده می‌شود
 
 ## نصب
-1. ریپو را clone کن
+1. زیپ را دانلود و Extract کن
 2. `chrome://extensions` → Developer mode → Load unpacked
-3. همین پوشه را انتخاب کن (باید `manifest.json` داخلش باشد)
+3. پوشه‌ای را انتخاب کن که `manifest.json` داخلش است
 4. تب یوتیوب را رفرش کن
 
 ## کلید Gemini
