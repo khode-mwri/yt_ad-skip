@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "یوتیوب فارسی — اسکیپ تبلیغ + مترجم",
   "short_name": "YT Farsi",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "اسکیپ تبلیغ یوتیوب، زیرنویس فارسی و دوبله زنده با Gemini Live Translate",
   "default_locale": "fa",
   "icons": {
