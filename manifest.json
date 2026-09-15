@@ -34,7 +34,7 @@
   "background": { "service_worker": "background.js" },
   "content_scripts": [{
     "matches": ["https://www.youtube.com/*", "https://m.youtube.com/*", "https://youtube.com/*"],
-    "js": ["content.js", "live-ui.js"],
+    "js": ["skip-ads.js", "content.js", "live-ui.js"],
     "css": ["content.css"],
     "run_at": "document_idle",
     "all_frames": false
