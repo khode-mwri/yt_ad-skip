@@ -11,64 +11,35 @@
     <div class="logo">▶</div>
     <div>
       <h1>یوتیوب فارسی</h1>
-      <p class="sub">اسکیپ تبلیغ + ترجمه زیرنویس</p>
+      <p class="sub">اسکیپ تبلیغ + ترجمه سریع زیرنویس</p>
     </div>
   </header>
-
   <section>
     <h2>تبلیغات</h2>
-    <label class="row">
-      <span>اسکیپ خودکار دکمه Skip</span>
-      <input type="checkbox" id="skipAds" />
-    </label>
-    <label class="row">
-      <span>بی‌صدا کردن تبلیغ</span>
-      <input type="checkbox" id="muteAds" />
-    </label>
-    <label class="row">
-      <span>تند کردن تبلیغ غیرقابل‌اسکیپ</span>
-      <input type="checkbox" id="speedAds" />
-    </label>
+    <label class="row"><span>اسکیپ خودکار دکمه Skip</span><input type="checkbox" id="skipAds" /></label>
+    <label class="row"><span>بی‌صدا کردن تبلیغ</span><input type="checkbox" id="muteAds" /></label>
+    <label class="row"><span>تند کردن تبلیغ غیرقابل‌اسکیپ</span><input type="checkbox" id="speedAds" /></label>
   </section>
-
   <section>
     <h2>ترجمه و صدا</h2>
-    <label class="row">
-      <span>زیرنویس فارسی روی ویدیو</span>
-      <input type="checkbox" id="translateSubs" />
-    </label>
-    <label class="row">
-      <span>نمایش متن اصلی هم</span>
-      <input type="checkbox" id="showOriginal" />
-    </label>
-    <label class="row">
-      <span>خواندن زیرنویس (دوبله ساده)</span>
-      <input type="checkbox" id="dubVoice" />
-    </label>
-    <label class="block">
-      <span>اندازه زیرنویس: <b id="fontVal">22</b></span>
-      <input type="range" id="fontSize" min="14" max="40" step="1" />
-    </label>
+    <label class="row"><span>زیرنویس فارسی روی ویدیو</span><input type="checkbox" id="translateSubs" /></label>
+    <label class="row"><span>نمایش متن اصلی هم</span><input type="checkbox" id="showOriginal" /></label>
+    <label class="row"><span>خواندن زیرنویس (دوبله ساده)</span><input type="checkbox" id="dubVoice" /></label>
+    <label class="block"><span>اندازه زیرنویس: <b id="fontVal">22</b></span><input type="range" id="fontSize" min="14" max="40" step="1" /></label>
     <label class="block">
       <span>موتور ترجمه</span>
       <select id="translatorEngine">
-        <option value="gemini">Gemini 3.5 Flash-Lite</option>
+        <option value="youtube">سریع — ترجمه خود یوتیوب</option>
         <option value="google">Google Translate</option>
+        <option value="gemini">Gemini (کیفیت بالا، کندتر)</option>
       </select>
     </label>
-    <label class="block">
-      <span>کلید Gemini API</span>
-      <input type="password" id="geminiApiKey" placeholder="AIza..." autocomplete="off" />
-    </label>
-    <p class="hint">کلید فقط روی همین مرورگر ذخیره می‌شود و به گیت‌هاب نمی‌رود. اگر خالی باشد از گوگل‌ترنسلیت استفاده می‌شود.</p>
+    <label class="block"><span>کلید Gemini API</span><input type="password" id="geminiApiKey" placeholder="AIza..." autocomplete="off" /></label>
+    <p class="hint">حالت پیش‌فرض: کل زیرنویس یک‌جا با خود یوتیوب فارسی می‌شود. Gemini فقط برای جلاگری خط‌های نزدیک زمان پخش است.</p>
   </section>
-
   <footer>
     <div>تبلیغ اسکیپ‌شده: <b id="skippedCount">0</b></div>
-    <p class="hint">
-      ترجمه وقتی کار می‌کند که خود یوتیوب زیرنویس (دستی یا خودکار) داشته باشد.
-      اول زیرنویس ویدیو را روشن کنید.
-    </p>
+    <p class="hint">دکمه CC یوتیوب را روشن بگذار. اگر ویدیو هیچ ترک زیرنویسی نداشته باشد ترجمه‌ای هم نیست.</p>
   </footer>
   <script src="popup.js"></script>
 </body>
