@@ -143,18 +143,14 @@
   }
   function clickPlayIfStuck(video) {
     const now = Date.now();
-    if (now - lastPlayNudgeAt < 700) return;
+    if (now - lastPlayNudgeAt < 900) return;
     const player = getPlayer();
     if (!player || isAdPlaying()) return;
-    const pausedUi = player.classList.contains("paused-mode") || player.classList.contains("unstarted-mode");
-    if (video && !video.paused && !pausedUi) return;
     lastPlayNudgeAt = now;
     if (video && video.paused) {
       const p = video.play();
       if (p && p.catch) p.catch(() => {});
     }
-    const large = player.querySelector(".ytp-large-play-button, .ytp-play-button");
-    if (large && (pausedUi || (video && video.paused))) clickLikeHuman(large);
   }
   function bindVideo(video) {
     if (!video || video === boundVideo) return;
@@ -165,10 +161,6 @@
     }
     video.addEventListener("ratechange", () => { if (!adActive && video.playbackRate > 0 && video.playbackRate <= 2) userRate = video.playbackRate; });
     video.addEventListener("volumechange", () => { if (!adActive) { userMuted = video.muted; userVolume = video.volume; } });
-    video.addEventListener("ended", () => {
-      if (adActive || isAdPlaying()) return;
-      clickPlayIfStuck(video);
-    });
   }
   function restoreUserPlayback(video) {
     if (!video) return;
@@ -204,14 +196,8 @@
         adActive = false;
         restoreUserPlayback(video);
         clickPlayIfStuck(video);
-        setTimeout(() => clickPlayIfStuck(getVideo()), 250);
-        setTimeout(() => clickPlayIfStuck(getVideo()), 800);
       } else if (video && video.playbackRate > 2) {
         restoreUserPlayback(video);
-        clickPlayIfStuck(video);
-      } else if (video && video.paused) {
-        const player = getPlayer();
-        if (player && player.classList.contains("paused-mode")) clickPlayIfStuck(video);
       }
     }
   }
