@@ -4,6 +4,7 @@
   bottom: 11%;
   transform: translateX(-50%);
   z-index: 2147483646;
+  width: min(78vw, 820px);
   max-width: min(86vw, 920px);
   pointer-events: none;
   display: none;
@@ -21,12 +22,16 @@
 
 #ytfarsi-overlay .ytfarsi-fa,
 #ytfarsi-overlay .ytfarsi-orig {
-  padding: 8px 16px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2.4em;
+  padding: 8px 18px;
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.72);
   color: #fff;
   line-height: 1.55;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  overflow-wrap: anywhere;
 }
 
 #ytfarsi-overlay .ytfarsi-fa {
