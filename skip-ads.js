@@ -15,7 +15,9 @@
   ].join(",");
 
   let lastAct = 0;
-  let lastPlay = 0;
+  let wasAd = false;
+  let resumeUntil = 0;
+  let resumeUsed = false;
 
   function player() {
     return document.querySelector("#movie_player") || document.querySelector(".html5-video-player");
@@ -83,22 +85,18 @@
     } catch (_) {}
     return false;
   }
-  function playIfNeeded() {
-    if (adOn()) return;
-    const now = Date.now();
-    if (now - lastPlay < 600) return;
+  function resumeOnceAfterAd() {
+    if (adOn() || resumeUsed || Date.now() > resumeUntil) return;
     const p = player();
     const v = videoEl();
-    if (!p) return;
-    const stuck = p.classList.contains("paused-mode") || p.classList.contains("unstarted-mode") || (v && v.paused);
-    if (!stuck) return;
-    lastPlay = now;
-    if (v && v.paused) {
-      const pr = v.play();
-      if (pr && pr.catch) pr.catch(() => {});
+    if (!p || !v) return;
+    if (!v.paused && !p.classList.contains("paused-mode")) {
+      resumeUsed = true;
+      return;
     }
-    const btn = p.querySelector(".ytp-large-play-button, .ytp-play-button");
-    if (btn) clickBtn(btn);
+    resumeUsed = true;
+    const pr = v.play();
+    if (pr && pr.catch) pr.catch(() => {});
   }
   function readySkips() {
     const root = player() || document;
@@ -113,22 +111,29 @@
   }
   function tick() {
     const v = videoEl();
-    if (!adOn()) {
-      playIfNeeded();
+    const on = adOn();
+    if (on) {
+      wasAd = true;
+      const ready = readySkips();
+      const now = Date.now();
+      if (ready.length && now - lastAct > 280) {
+        clickBtn(ready[0]);
+        seekEnd(v);
+        lastAct = now;
+        return;
+      }
+      if (v && v.currentTime >= 4.9 && now - lastAct > 400) {
+        seekEnd(v);
+        lastAct = now;
+      }
       return;
     }
-    const ready = readySkips();
-    const now = Date.now();
-    if (ready.length && now - lastAct > 280) {
-      clickBtn(ready[0]);
-      seekEnd(v);
-      lastAct = now;
-      return;
+    if (wasAd) {
+      wasAd = false;
+      resumeUsed = false;
+      resumeUntil = Date.now() + 1600;
     }
-    if (v && v.currentTime >= 4.9 && now - lastAct > 400) {
-      seekEnd(v);
-      lastAct = now;
-    }
+    resumeOnceAfterAd();
   }
   setInterval(tick, 180);
   const mo = new MutationObserver(tick);
@@ -137,5 +142,10 @@
     try { mo.observe(p, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "aria-disabled", "disabled"] }); } catch (_) {}
   };
   start();
-  document.addEventListener("yt-navigate-finish", () => setTimeout(start, 200));
+  document.addEventListener("yt-navigate-finish", () => {
+    wasAd = false;
+    resumeUntil = 0;
+    resumeUsed = true;
+    setTimeout(start, 200);
+  });
 })();
