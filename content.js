@@ -50,6 +50,9 @@
   let lastSkipAt = 0;
   let lastSpoken = "";
   let lastCaptionKey = "";
+  let pendingCaption = "";
+  let captionSettleAt = 0;
+  let hideCaptionAt = 0;
   const cache = new Map();
   let overlayEl = null;
   let observer = null;
@@ -322,6 +325,28 @@
     window.speechSynthesis.speak(u);
   }
 
+  function isGrowingCaption(prev, next) {
+    if (!prev || !next) return false;
+    if (next === prev) return false;
+    if (next.startsWith(prev)) return true;
+    const prevWords = prev.split(/\s+/);
+    const nextWords = next.split(/\s+/);
+    if (nextWords.length > prevWords.length && next.startsWith(prevWords.slice(0, -1).join(" "))) {
+      return true;
+    }
+    return false;
+  }
+
+  async function commitCaption(original) {
+    if (!original || original === lastCaptionKey) return;
+    lastCaptionKey = original;
+    const translated = await translateText(original);
+    if (original !== lastCaptionKey) return;
+    if (settings.translateSubs) showOverlay(original, translated);
+    else hideOverlay();
+    if (settings.dubVoice) speakFa(translated);
+  }
+
   async function handleCaptions() {
     if (!settings.translateSubs && !settings.dubVoice) {
       hideOverlay();
@@ -331,17 +356,36 @@
       hideOverlay();
       return;
     }
+
     const original = readNativeCaption();
+    const now = Date.now();
+
     if (!original) {
-      hideOverlay();
+      if (!hideCaptionAt) hideCaptionAt = now + 700;
+      if (now >= hideCaptionAt) {
+        hideOverlay();
+        lastCaptionKey = "";
+        pendingCaption = "";
+      }
       return;
     }
-    if (original === lastCaptionKey) return;
-    lastCaptionKey = original;
-    const translated = await translateText(original);
-    if (settings.translateSubs) showOverlay(original, translated);
-    else hideOverlay();
-    if (settings.dubVoice) speakFa(translated);
+
+    hideCaptionAt = 0;
+
+    if (original === lastCaptionKey) {
+      pendingCaption = original;
+      return;
+    }
+
+    if (isGrowingCaption(pendingCaption || lastCaptionKey, original) || original !== pendingCaption) {
+      pendingCaption = original;
+      captionSettleAt = now + 550;
+      return;
+    }
+
+    if (pendingCaption && now >= captionSettleAt) {
+      await commitCaption(pendingCaption);
+    }
   }
 
   function tick() {
@@ -371,6 +415,9 @@
   startObserver();
   document.addEventListener("yt-navigate-finish", () => {
     lastCaptionKey = "";
+    pendingCaption = "";
+    captionSettleAt = 0;
+    hideCaptionAt = 0;
     lastSpoken = "";
     adActive = false;
     boundVideo = null;
