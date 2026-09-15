@@ -52,11 +52,16 @@
   let lastCaptionKey = "";
   let pendingCaption = "";
   let captionSettleAt = 0;
-  let hideCaptionAt = 0;
   const cache = new Map();
   let overlayEl = null;
   let observer = null;
   let boundVideo = null;
+  let cueList = [];
+  let cueIndex = 0;
+  let activeVideoId = "";
+  let captionState = "";
+  let loadToken = 0;
+  let useLiveFallback = false;
 
   chrome.storage.sync.get(DEFAULTS, (stored) => {
     settings = { ...DEFAULTS, ...stored };
@@ -74,10 +79,7 @@
   });
 
   function getPlayer() {
-    return (
-      document.querySelector("#movie_player") ||
-      document.querySelector(".html5-video-player")
-    );
+    return document.querySelector("#movie_player") || document.querySelector(".html5-video-player");
   }
 
   function getVideo() {
@@ -109,10 +111,7 @@
   function isAdPlaying() {
     const player = getPlayer();
     if (!player) return false;
-    return (
-      player.classList.contains("ad-showing") ||
-      player.classList.contains("ad-interrupting")
-    );
+    return player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting");
   }
 
   function clickLikeHuman(el) {
@@ -125,40 +124,21 @@
     const rect = el.getBoundingClientRect();
     const x = rect.left + Math.max(2, rect.width / 2);
     const y = rect.top + Math.max(2, rect.height / 2);
-    const opts = {
-      bubbles: true,
-      cancelable: true,
-      view: window,
-      clientX: x,
-      clientY: y,
-      buttons: 1
-    };
-    for (const type of ["pointerover", "pointerenter", "mouseover", "pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+    const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, buttons: 1 };
+    for (const type of ["pointerover", "mouseover", "pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
       try {
         el.dispatchEvent(new PointerEvent(type, { ...opts, pointerId: 1, pointerType: "mouse" }));
       } catch (_) {
-        try {
-          el.dispatchEvent(new MouseEvent(type, opts));
-        } catch (__) {}
+        try { el.dispatchEvent(new MouseEvent(type, opts)); } catch (__) {}
       }
     }
-    try {
-      el.click();
-    } catch (_) {}
-    const inner = el.querySelector?.("button, .ytp-skip-ad-button__text, span, div");
-    if (inner && inner !== el) {
-      try {
-        inner.click();
-      } catch (_) {}
-    }
+    try { el.click(); } catch (_) {}
   }
 
   function findSkipButtons() {
     const player = getPlayer() || document;
     const found = new Set();
-    try {
-      player.querySelectorAll(SKIP_SELECTORS).forEach((b) => found.add(b));
-    } catch (_) {}
+    try { player.querySelectorAll(SKIP_SELECTORS).forEach((b) => found.add(b)); } catch (_) {}
     try {
       player.querySelectorAll("button, [role='button']").forEach((b) => {
         if (looksLikeSkip(b)) found.add(b);
@@ -202,9 +182,7 @@
 
   function restoreUserPlayback(video) {
     if (!video) return;
-    try {
-      video.playbackRate = userRate || 1;
-    } catch (_) {}
+    try { video.playbackRate = userRate || 1; } catch (_) {}
     video.muted = userMuted;
     video.volume = userVolume;
   }
@@ -213,23 +191,16 @@
     const video = getVideo();
     if (video) bindVideo(video);
     const playingAd = isAdPlaying();
-
     if (playingAd && !adActive && video) {
       adActive = true;
       if (video.playbackRate && video.playbackRate <= 2) userRate = video.playbackRate;
       userMuted = video.muted;
       userVolume = video.volume;
-      if (settings.muteAds) {
-        video.muted = true;
-      }
+      if (settings.muteAds) video.muted = true;
       if (settings.speedAds) {
-        const speed = Number(settings.adSpeed) || 16;
-        try {
-          video.playbackRate = Math.min(16, Math.max(2, speed));
-        } catch (_) {}
+        try { video.playbackRate = Math.min(16, Math.max(2, Number(settings.adSpeed) || 16)); } catch (_) {}
       }
     }
-
     if (playingAd && settings.skipAds) {
       const buttons = findSkipButtons();
       const now = Date.now();
@@ -239,15 +210,10 @@
         lastSkipAt = now;
         chrome.runtime.sendMessage({ type: "INCREMENT_SKIP" }).catch(() => {});
       }
-      const preview = document.querySelector(".ytp-ad-preview-container, .ytp-preview-ad, .ytp-ad-text.ytp-ad-preview-text-modern");
-      if (!buttons.length && preview && video && video.currentTime >= 5) {
-        jumpAdToEnd(video);
-      }
       document.querySelectorAll(OVERLAY_AD_SELECTORS).forEach((el) => {
         if (isVisible(el)) clickLikeHuman(el);
       });
     }
-
     if (!playingAd) {
       if (adActive && video) {
         adActive = false;
@@ -262,8 +228,7 @@
     if (overlayEl && document.body.contains(overlayEl)) return overlayEl;
     overlayEl = document.createElement("div");
     overlayEl.id = "ytfarsi-overlay";
-    overlayEl.innerHTML =
-      '<div class="ytfarsi-orig"></div><div class="ytfarsi-fa"></div>';
+    overlayEl.innerHTML = '<div class="ytfarsi-status"></div><div class="ytfarsi-orig"></div><div class="ytfarsi-fa"></div>';
     (document.body || document.documentElement).appendChild(overlayEl);
     applyOverlayStyle();
     return overlayEl;
@@ -279,18 +244,91 @@
     if (overlayEl) overlayEl.classList.remove("visible");
   }
 
-  function showOverlay(original, translated) {
+  function setCaptionState(text) {
+    captionState = text || "";
     const el = ensureOverlay();
-    el.querySelector(".ytfarsi-orig").textContent = original || "";
-    el.querySelector(".ytfarsi-fa").textContent = translated || "";
-    el.classList.toggle("visible", !!(translated || (settings.showOriginal && original)));
+    const st = el.querySelector(".ytfarsi-status");
+    if (st) st.textContent = captionState;
+    el.classList.toggle("visible", !!(captionState || el.querySelector(".ytfarsi-fa")?.textContent));
   }
 
-  function readNativeCaption() {
-    const parts = [...document.querySelectorAll(CAPTION_SELECTORS)]
-      .map((n) => (n.innerText || n.textContent || "").trim())
-      .filter(Boolean);
-    return parts.join(" ").replace(/\s+/g, " ").trim();
+  function showOverlay(original, translated) {
+    const el = ensureOverlay();
+    const st = el.querySelector(".ytfarsi-status");
+    if (st) st.textContent = captionState || "";
+    el.querySelector(".ytfarsi-orig").textContent = original || "";
+    el.querySelector(".ytfarsi-fa").textContent = translated || "";
+    el.classList.toggle("visible", !!(translated || (settings.showOriginal && original) || captionState));
+  }
+
+  function getVideoId() {
+    const u = new URL(location.href);
+    if (u.pathname === "/watch") return u.searchParams.get("v") || "";
+    const short = u.pathname.match(/^\/shorts\/([^/?]+)/);
+    if (short) return short[1];
+    return "";
+  }
+
+  function extractJsonAfter(source, marker) {
+    const i = source.indexOf(marker);
+    if (i < 0) return null;
+    const start = source.indexOf("{", i);
+    if (start < 0) return null;
+    let depth = 0, inStr = false, esc = false;
+    for (let n = start; n < source.length; n++) {
+      const ch = source[n];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === "\\") esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') inStr = true;
+      else if (ch === "{") depth += 1;
+      else if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          try { return JSON.parse(source.slice(start, n + 1)); } catch (_) { return null; }
+        }
+      }
+    }
+    return null;
+  }
+
+  function getPlayerResponse() {
+    try {
+      const player = getPlayer();
+      if (player && typeof player.getPlayerResponse === "function") {
+        const pr = player.getPlayerResponse();
+        if (pr?.captions || pr?.videoDetails) return pr;
+      }
+    } catch (_) {}
+    if (window.ytInitialPlayerResponse?.captions) return window.ytInitialPlayerResponse;
+    const scripts = document.querySelectorAll("script");
+    for (const s of scripts) {
+      const t = s.textContent || "";
+      if (t.includes("ytInitialPlayerResponse")) {
+        const pr = extractJsonAfter(t, "ytInitialPlayerResponse");
+        if (pr?.captions || pr?.videoDetails) return pr;
+      }
+    }
+    return null;
+  }
+
+  function pickCaptionTrack(pr) {
+    const tracks = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    if (!tracks.length) return null;
+    const scored = tracks.map((t) => {
+      const lang = (t.languageCode || "").toLowerCase();
+      let score = 0;
+      if (t.kind !== "asr") score += 5;
+      if (lang.startsWith("en")) score += 4;
+      if (lang.startsWith("fa") || lang.startsWith("pe")) score += 6;
+      if (t.baseUrl) score += 2;
+      return { t, score };
+    });
+    scored.sort((a, b) => b.score - a.score);
+    return scored[0].t;
   }
 
   async function translateText(text) {
@@ -299,10 +337,6 @@
       const res = await chrome.runtime.sendMessage({ type: "TRANSLATE", texts: [text] });
       const translated = res?.ok ? res.translations?.[0] || text : text;
       cache.set(text, translated);
-      if (cache.size > 400) {
-        const first = cache.keys().next().value;
-        cache.delete(first);
-      }
       return translated;
     } catch (_) {
       return text;
@@ -316,38 +350,146 @@
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     const voices = window.speechSynthesis.getVoices() || [];
-    const fa =
-      voices.find((v) => /^fa/i.test(v.lang)) ||
-      voices.find((v) => /persian|farsi|iran/i.test(v.name));
+    const fa = voices.find((v) => /^fa/i.test(v.lang)) || voices.find((v) => /persian|farsi|iran/i.test(v.name));
     if (fa) u.voice = fa;
     u.lang = "fa-IR";
     u.rate = 1.05;
     window.speechSynthesis.speak(u);
   }
 
+  async function loadCuesForVideo(videoId) {
+    const token = ++loadToken;
+    cueList = [];
+    cueIndex = 0;
+    useLiveFallback = false;
+    setCaptionState("در حال گرفتن زیرنویس کامل ویدیو…");
+    let pr = getPlayerResponse();
+    for (let wait = 0; wait < 8 && !pickCaptionTrack(pr); wait += 1) {
+      setCaptionState("منتظر زیرنویس یوتیوب…");
+      await new Promise((r) => setTimeout(r, 700));
+      if (token !== loadToken) return;
+      pr = getPlayerResponse();
+    }
+    const track = pickCaptionTrack(pr);
+    if (!track?.baseUrl) {
+      useLiveFallback = true;
+      setCaptionState("ترک کامل نیست — اگر CC روشن باشد زنده ترجمه می‌شود");
+      setTimeout(() => { if (captionState.includes("زنده")) setCaptionState(""); }, 4000);
+      return;
+    }
+    setCaptionState(track.kind === "asr" ? "دانلود زیرنویس خودکار…" : "دانلود زیرنویس رسمی…");
+    let cues = [];
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "FETCH_TIMEDTEXT", url: track.baseUrl });
+      if (res?.ok && res.cues?.length) cues = res.cues;
+    } catch (_) {}
+    if (token !== loadToken) return;
+    if (!cues.length) {
+      useLiveFallback = true;
+      setCaptionState("فایل کپشن نخوانده شد — زیرنویس زنده CC را روشن کن");
+      return;
+    }
+    const cacheKey = "capcache:" + videoId + ":" + (track.languageCode || "") + ":" + (track.kind || "m");
+    let stored = null;
+    try { stored = (await chrome.storage.local.get(cacheKey))[cacheKey]; } catch (_) {}
+    const byText = new Map();
+    if (stored?.map) Object.entries(stored.map).forEach(([k, v]) => byText.set(k, v));
+    const unique = [];
+    cues.forEach((c) => {
+      if (c.text && !byText.has(c.text) && !unique.includes(c.text)) unique.push(c.text);
+    });
+    setCaptionState("ترجمه " + unique.length + " خط جدید از " + cues.length + " خط…");
+    for (let i = 0; i < unique.length; i += 40) {
+      if (token !== loadToken) return;
+      const slice = unique.slice(i, i + 40);
+      try {
+        const tr = await chrome.runtime.sendMessage({ type: "TRANSLATE", texts: slice });
+        if (tr?.ok) {
+          slice.forEach((src, n) => {
+            const val = tr.translations?.[n] || src;
+            byText.set(src, val);
+            cache.set(src, val);
+          });
+        }
+      } catch (_) {
+        slice.forEach((src) => byText.set(src, src));
+      }
+      setCaptionState("ترجمه شد " + Math.min(i + 40, unique.length) + " از " + unique.length);
+    }
+    cueList = cues.map((c) => ({ start: c.start, end: c.end, text: c.text, fa: byText.get(c.text) || c.text }));
+    try {
+      const map = {};
+      byText.forEach((v, k) => { map[k] = v; });
+      await chrome.storage.local.set({ [cacheKey]: { map, at: Date.now() } });
+    } catch (_) {}
+    setCaptionState(cueList.length + " خط آماده‌ست");
+    setTimeout(() => { if (captionState.endsWith("آماده‌ست")) setCaptionState(""); }, 2500);
+  }
+
+  function findCue(time) {
+    if (!cueList.length) return null;
+    let i = cueIndex;
+    if (i >= cueList.length) i = cueList.length - 1;
+    if (i < 0) i = 0;
+    while (i + 1 < cueList.length && cueList[i + 1].start <= time) i += 1;
+    while (i > 0 && cueList[i].start > time) i -= 1;
+    cueIndex = i;
+    const c = cueList[i];
+    if (time >= c.start - 0.15 && time <= c.end + 0.35) return c;
+    return null;
+  }
+
+  function readNativeCaption() {
+    const parts = [...document.querySelectorAll(CAPTION_SELECTORS)]
+      .map((n) => (n.innerText || n.textContent || "").trim())
+      .filter(Boolean);
+    return parts.join(" ").replace(/\s+/g, " ").trim();
+  }
+
   function isGrowingCaption(prev, next) {
-    if (!prev || !next) return false;
-    if (next === prev) return false;
+    if (!prev || !next || next === prev) return false;
     if (next.startsWith(prev)) return true;
     const prevWords = prev.split(/\s+/);
     const nextWords = next.split(/\s+/);
-    if (nextWords.length > prevWords.length && next.startsWith(prevWords.slice(0, -1).join(" "))) {
-      return true;
+    return nextWords.length > prevWords.length && next.startsWith(prevWords.slice(0, -1).join(" "));
+  }
+
+  async function handleLiveCaption() {
+    const original = readNativeCaption();
+    const now = Date.now();
+    if (!original) return;
+    if (original === lastCaptionKey) return;
+    if (isGrowingCaption(pendingCaption || lastCaptionKey, original) || original !== pendingCaption) {
+      pendingCaption = original;
+      captionSettleAt = now + 450;
+      return;
     }
-    return false;
+    if (pendingCaption && now >= captionSettleAt) {
+      lastCaptionKey = pendingCaption;
+      const translated = await translateText(pendingCaption);
+      if (settings.translateSubs) showOverlay(pendingCaption, translated);
+      if (settings.dubVoice) speakFa(translated);
+    }
   }
 
-  async function commitCaption(original) {
-    if (!original || original === lastCaptionKey) return;
-    lastCaptionKey = original;
-    const translated = await translateText(original);
-    if (original !== lastCaptionKey) return;
-    if (settings.translateSubs) showOverlay(original, translated);
-    else hideOverlay();
-    if (settings.dubVoice) speakFa(translated);
+  function handlePrefetchedCaption() {
+    const video = getVideo();
+    if (!video || !cueList.length) return;
+    const cue = findCue(video.currentTime || 0);
+    if (!cue) {
+      if (!captionState) hideOverlay();
+      return;
+    }
+    if (cue.text === lastCaptionKey) {
+      showOverlay(cue.text, cue.fa);
+      return;
+    }
+    lastCaptionKey = cue.text;
+    if (settings.translateSubs) showOverlay(cue.text, cue.fa);
+    if (settings.dubVoice) speakFa(cue.fa);
   }
 
-  async function handleCaptions() {
+  function handleCaptions() {
     if (!settings.translateSubs && !settings.dubVoice) {
       hideOverlay();
       return;
@@ -356,59 +498,28 @@
       hideOverlay();
       return;
     }
-
-    const original = readNativeCaption();
-    const now = Date.now();
-
-    if (!original) {
-      if (!hideCaptionAt) hideCaptionAt = now + 700;
-      if (now >= hideCaptionAt) {
-        hideOverlay();
-        lastCaptionKey = "";
-        pendingCaption = "";
-      }
-      return;
+    const id = getVideoId();
+    if (id && id !== activeVideoId) {
+      activeVideoId = id;
+      loadCuesForVideo(id).catch(() => {
+        useLiveFallback = true;
+        setCaptionState("خطا — زیرنویس زنده CC را روشن کن");
+      });
     }
-
-    hideCaptionAt = 0;
-
-    if (original === lastCaptionKey) {
-      pendingCaption = original;
-      return;
-    }
-
-    if (isGrowingCaption(pendingCaption || lastCaptionKey, original) || original !== pendingCaption) {
-      pendingCaption = original;
-      captionSettleAt = now + 550;
-      return;
-    }
-
-    if (pendingCaption && now >= captionSettleAt) {
-      await commitCaption(pendingCaption);
-    }
+    if (cueList.length) handlePrefetchedCaption();
+    else if (useLiveFallback) handleLiveCaption();
   }
 
   function tick() {
-    try {
-      handleAds();
-    } catch (_) {}
-    try {
-      handleCaptions();
-    } catch (_) {}
+    try { handleAds(); } catch (_) {}
+    try { handleCaptions(); } catch (_) {}
   }
 
   function startObserver() {
     if (observer) observer.disconnect();
     const player = getPlayer() || document.documentElement;
-    observer = new MutationObserver(() => {
-      handleAds();
-    });
-    observer.observe(player, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["class"]
-    });
+    observer = new MutationObserver(() => { handleAds(); });
+    observer.observe(player, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
   }
 
   setInterval(tick, 200);
@@ -416,9 +527,13 @@
   document.addEventListener("yt-navigate-finish", () => {
     lastCaptionKey = "";
     pendingCaption = "";
-    captionSettleAt = 0;
-    hideCaptionAt = 0;
     lastSpoken = "";
+    cueList = [];
+    cueIndex = 0;
+    activeVideoId = "";
+    captionState = "";
+    useLiveFallback = false;
+    loadToken += 1;
     adActive = false;
     boundVideo = null;
     hideOverlay();
@@ -427,9 +542,6 @@
     setTimeout(startObserver, 250);
   });
 
-  if (document.readyState === "complete" || document.readyState === "interactive") {
-    tick();
-  } else {
-    document.addEventListener("DOMContentLoaded", tick, { once: true });
-  }
+  if (document.readyState === "complete" || document.readyState === "interactive") tick();
+  else document.addEventListener("DOMContentLoaded", tick, { once: true });
 })();
