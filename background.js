@@ -37,7 +37,41 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .catch((err) => sendResponse({ ok: false, error: String(err) }));
     return true;
   }
+
+  if (msg?.type === "FETCH_TIMEDTEXT") {
+    fetchTimedText(msg.url)
+      .then((cues) => sendResponse({ ok: true, cues }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true;
+  }
 });
+
+async function fetchTimedText(url) {
+  if (!url || !/^https:\/\/(www\.)?youtube\.com\//.test(url)) {
+    throw new Error("bad_caption_url");
+  }
+  const joined = url.includes("fmt=") ? url : url + (url.includes("?") ? "&" : "?") + "fmt=json3";
+  const res = await fetch(joined);
+  if (!res.ok) throw new Error("timedtext_" + res.status);
+  const data = await res.json();
+  const cues = [];
+  for (const ev of data.events || []) {
+    if (!ev || ev.tStartMs == null) continue;
+    const text = (ev.segs || [])
+      .map((s) => s.utf8 || "")
+      .join("")
+      .replace(/\n+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!text || text === "\n") continue;
+    cues.push({
+      start: ev.tStartMs / 1000,
+      end: (ev.tStartMs + (ev.dDurationMs || 2000)) / 1000,
+      text
+    });
+  }
+  return cues;
+}
 
 async function getEngineSettings() {
   const sync = await chrome.storage.sync.get({ translatorEngine: "gemini" });
@@ -49,21 +83,55 @@ async function getEngineSettings() {
 }
 
 async function translateBatch(texts) {
+  const clean = (texts || []).map((t) => String(t || "").trim());
   const { engine, apiKey } = await getEngineSettings();
+  if (engine === "gemini" && apiKey) {
+    try {
+      return await translateGeminiMany(clean, apiKey);
+    } catch (_) {}
+  }
   const out = [];
-  for (const text of texts) {
-    if (engine === "gemini" && apiKey) {
-      try {
-        out.push(await translateGemini(text, apiKey));
-        continue;
-      } catch (_) {
-        out.push(await translateGoogle(text));
-        continue;
-      }
-    }
-    out.push(await translateGoogle(text));
+  const chunk = 8;
+  for (let i = 0; i < clean.length; i += chunk) {
+    const slice = clean.slice(i, i + chunk);
+    const parts = await Promise.all(slice.map((t) => translateGoogle(t)));
+    out.push(...parts);
   }
   return out;
+}
+
+async function translateGeminiMany(texts, apiKey) {
+  const results = new Array(texts.length).fill("");
+  const pending = [];
+  texts.forEach((t, i) => {
+    if (!t) results[i] = "";
+    else pending.push(i);
+  });
+  const size = 25;
+  for (let i = 0; i < pending.length; i += size) {
+    const idxs = pending.slice(i, i + size);
+    const payload = idxs.map((idx, n) => n + 1 + ". " + texts[idx]).join("\n");
+    const translated = await translateGemini(
+      "این خط‌ها را به فارسی روان ترجمه کن. هر خط را با همان شماره برگردان و هیچ چیز اضافه ننویس.\n" + payload,
+      apiKey
+    );
+    const map = parseNumbered(translated);
+    idxs.forEach((idx, n) => {
+      results[idx] = map[n + 1] || texts[idx];
+    });
+  }
+  return results;
+}
+
+function parseNumbered(block) {
+  const map = {};
+  String(block || "")
+    .split(/\n+/)
+    .forEach((line) => {
+      const m = line.match(/^\s*(\d+)[\.\-\:\)]\s*(.+)$/);
+      if (m) map[Number(m[1])] = m[2].trim();
+    });
+  return map;
 }
 
 async function translateGemini(text, apiKey) {
@@ -88,7 +156,7 @@ async function translateGemini(text, apiKey) {
       contents: [{ role: "user", parts: [{ text: q }] }],
       generationConfig: {
         temperature: 0.2,
-        maxOutputTokens: 256
+        maxOutputTokens: 2048
       }
     })
   });

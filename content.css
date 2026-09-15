@@ -34,6 +34,19 @@
   overflow-wrap: anywhere;
 }
 
+#ytfarsi-overlay .ytfarsi-status {
+  font-size: 12px;
+  font-weight: 600;
+  color: #5eead4;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+#ytfarsi-overlay .ytfarsi-status:empty {
+  display: none;
+}
+
 #ytfarsi-overlay .ytfarsi-fa {
   font-size: var(--ytfarsi-size, 22px);
   font-weight: 700;
