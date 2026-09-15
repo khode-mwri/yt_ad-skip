@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "یوتیوب فارسی — اسکیپ تبلیغ + مترجم",
   "short_name": "YT Farsi",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "اسکیپ خودکار تبلیغات یوتیوب و ترجمه/خواندن زیرنویس به فارسی",
   "default_locale": "fa",
   "icons": {

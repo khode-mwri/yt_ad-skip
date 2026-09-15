@@ -1,0 +1,25 @@
+name: Generate icons
+
+on:
+  workflow_dispatch:
+
+jobs:
+  icons:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pillow
+      - run: python scripts/generate_icons.py
+      - name: Commit icons
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add icons/*.png scripts/generate_icons.py
+          git diff --cached --quiet && echo "no changes" && exit 0
+          git commit -m "Add valid PNG extension icons"
+          git push
