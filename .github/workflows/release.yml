@@ -1,0 +1,28 @@
+name: Release extension zip
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build zip
+        run: |
+          zip -r yt-farsi-helper-${GITHUB_REF_NAME}.zip . \
+            -x ".git/*" ".github/*" "*.zip"
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: |
+            زیپ افزونه را دانلود کن، Extract کن، بعد Load unpacked.
+            روی خود فایل .zip نزن.
+          files: yt-farsi-helper-${{ github.ref_name }}.zip
+          generate_release_notes: true
