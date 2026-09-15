@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "یوتیوب فارسی — اسکیپ تبلیغ + مترجم",
+  "short_name": "YT Farsi",
+  "version": "1.1.0",
+  "description": "اسکیپ خودکار تبلیغات یوتیوب و ترجمه/خواندن زیرنویس به فارسی",
+  "default_locale": "fa",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "یوتیوب فارسی",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://m.youtube.com/*",
+    "https://youtu.be/*",
+    "https://translate.googleapis.com/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://m.youtube.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "yt-farsi-helper@local",
+      "strict_min_version": "115.0"
+    }
+  }
+}
