@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "یوتیوب فارسی — اسکیپ تبلیغ + مترجم",
   "short_name": "YT Farsi",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "اسکیپ خودکار تبلیغات یوتیوب و ترجمه/خواندن زیرنویس به فارسی",
   "default_locale": "fa",
   "icons": {
@@ -24,7 +24,9 @@
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://m.youtube.com/*",
+    "https://youtube.com/*",
     "https://youtu.be/*",
+    "https://*.googlevideo.com/*",
     "https://translate.googleapis.com/*",
     "https://generativelanguage.googleapis.com/*"
   ],
@@ -35,7 +37,8 @@
     {
       "matches": [
         "https://www.youtube.com/*",
-        "https://m.youtube.com/*"
+        "https://m.youtube.com/*",
+        "https://youtube.com/*"
       ],
       "js": ["content.js"],
       "css": ["content.css"],

@@ -41,19 +41,41 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "FETCH_TIMEDTEXT") {
     fetchTimedText(msg.url)
       .then((cues) => sendResponse({ ok: true, cues }))
-      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+      .catch((err) => sendResponse({ ok: false, error: String(err), cues: [] }));
     return true;
   }
 });
 
-async function fetchTimedText(url) {
-  if (!url || !/^https:\/\/(www\.)?youtube\.com\//.test(url)) {
-    throw new Error("bad_caption_url");
+function normalizeCaptionUrl(raw, fmt) {
+  if (!raw) return "";
+  let s = String(raw).replace(/&amp;/g, "&").replace(/\\u0026/g, "&").trim();
+  if (s.startsWith("//")) s = "https:" + s;
+  if (s.startsWith("/")) s = "https://www.youtube.com" + s;
+  let u;
+  try {
+    u = new URL(s);
+  } catch (_) {
+    return "";
   }
-  const joined = url.includes("fmt=") ? url : url + (url.includes("?") ? "&" : "?") + "fmt=json3";
-  const res = await fetch(joined);
-  if (!res.ok) throw new Error("timedtext_" + res.status);
-  const data = await res.json();
+  if (fmt) u.searchParams.set("fmt", fmt);
+  return u.toString();
+}
+
+function allowedCaptionUrl(url) {
+  try {
+    const h = new URL(url).hostname;
+    return (
+      /(^|\.)youtube\.com$/i.test(h) ||
+      /(^|\.)youtu\.be$/i.test(h) ||
+      /(^|\.)googlevideo\.com$/i.test(h) ||
+      /(^|\.)youtube-nocookie\.com$/i.test(h)
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function parseJson3(data) {
   const cues = [];
   for (const ev of data.events || []) {
     if (!ev || ev.tStartMs == null) continue;
@@ -63,14 +85,121 @@ async function fetchTimedText(url) {
       .replace(/\n+/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    if (!text || text === "\n") continue;
+    if (!text) continue;
     cues.push({
       start: ev.tStartMs / 1000,
-      end: (ev.tStartMs + (ev.dDurationMs || 2000)) / 1000,
+      end: (ev.tStartMs + (ev.dDurationMs || 2500)) / 1000,
       text
     });
   }
   return cues;
+}
+
+function decodeXml(s) {
+  return String(s || "")
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseSrv3(xml) {
+  const cues = [];
+  const pRe = /<p\b([^>]*)>([\s\S]*?)<\/p>/gi;
+  let m;
+  while ((m = pRe.exec(xml))) {
+    const attrs = m[1] || "";
+    const t = Number((attrs.match(/\bt=["']?(\d+)/) || [])[1]);
+    const d = Number((attrs.match(/\bd=["']?(\d+)/) || [])[1] || 2500);
+    const text = decodeXml(m[2]);
+    if (!text || Number.isNaN(t)) continue;
+    cues.push({ start: t / 1000, end: (t + d) / 1000, text });
+  }
+  if (cues.length) return cues;
+  const tRe = /<text\b([^>]*)>([\s\S]*?)<\/text>/gi;
+  while ((m = tRe.exec(xml))) {
+    const attrs = m[1] || "";
+    const start = Number((attrs.match(/\bstart=["']?([\d.]+)/) || [])[1]);
+    const dur = Number((attrs.match(/\bdur=["']?([\d.]+)/) || [])[1] || 2.5);
+    const text = decodeXml(m[2]);
+    if (!text || Number.isNaN(start)) continue;
+    cues.push({ start, end: start + dur, text });
+  }
+  return cues;
+}
+
+function parseVtt(vtt) {
+  const cues = [];
+  const blocks = String(vtt || "").split(/\r?\n\r?\n/);
+  const timeRe = /(\d{2}:)?(\d{2}):(\d{2})\.(\d{3})\s+-->\s+(\d{2}:)?(\d{2}):(\d{2})\.(\d{3})/;
+  const toSec = (hh, mm, ss, ms) =>
+    Number(hh || 0) * 3600 + Number(mm) * 60 + Number(ss) + Number(ms) / 1000;
+  for (const block of blocks) {
+    const lines = block.split(/\r?\n/).filter(Boolean);
+    if (!lines.length) continue;
+    const idx = lines.findIndex((l) => timeRe.test(l));
+    if (idx < 0) continue;
+    const tm = lines[idx].match(timeRe);
+    const text = lines
+      .slice(idx + 1)
+      .join(" ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!text) continue;
+    cues.push({
+      start: toSec(tm[1], tm[2], tm[3], tm[4]),
+      end: toSec(tm[5], tm[6], tm[7], tm[8]),
+      text
+    });
+  }
+  return cues;
+}
+
+function parseCaptionBody(body) {
+  const raw = String(body || "").trim();
+  if (!raw) return [];
+  if (raw.startsWith("{") || raw.startsWith("[")) {
+    try {
+      return parseJson3(JSON.parse(raw));
+    } catch (_) {}
+  }
+  if (raw.includes("<timedtext") || raw.includes("<p ") || raw.includes("<text ")) {
+    return parseSrv3(raw);
+  }
+  if (/WEBVTT/i.test(raw) || /-->/.test(raw)) return parseVtt(raw);
+  return [];
+}
+
+async function fetchTimedText(url) {
+  const formats = ["json3", "srv3", "vtt"];
+  let lastErr = "empty";
+  for (const fmt of formats) {
+    const joined = normalizeCaptionUrl(url, fmt);
+    if (!allowedCaptionUrl(joined)) {
+      lastErr = "bad_caption_url";
+      continue;
+    }
+    try {
+      const res = await fetch(joined, { credentials: "include" });
+      if (!res.ok) {
+        lastErr = "http_" + res.status;
+        continue;
+      }
+      const body = await res.text();
+      const cues = parseCaptionBody(body);
+      if (cues.length) return cues;
+      lastErr = "no_cues_" + fmt;
+    } catch (e) {
+      lastErr = String(e);
+    }
+  }
+  throw new Error(lastErr);
 }
 
 async function getEngineSettings() {
@@ -154,10 +283,7 @@ async function translateGemini(text, apiKey) {
         ]
       },
       contents: [{ role: "user", parts: [{ text: q }] }],
-      generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: 2048
-      }
+      generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
     })
   });
   if (!res.ok) throw new Error("gemini_http_" + res.status);
