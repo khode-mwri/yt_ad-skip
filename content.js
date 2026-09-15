@@ -2,15 +2,27 @@
   "use strict";
 
   const SKIP_SELECTORS = [
-    ".ytp-skip-ad-button", ".ytp-skip-ad-button__text", ".ytp-ad-skip-button",
-    ".ytp-ad-skip-button-modern", ".ytp-ad-skip-button-container",
-    ".ytp-ad-skip-button-container button", ".ytp-ad-skip-button-slot",
-    ".ytp-ad-skip-button-slot button", "button.ytp-skip-ad-button",
-    "button.ytp-ad-skip-button-modern", '[class*="ytp-skip-ad-button"]',
-    '[class*="ytp-ad-skip-button"]', '[id^="skip-button"]',
-    ".ytp-ad-hover-text-button", ".videoAdUiSkipButton", ".videoAdUiSkipContainer"
+    ".ytp-skip-ad-button", ".ytp-skip-ad-button__text",
+    ".ytp-ad-skip-button", ".ytp-ad-skip-button-modern",
+    ".ytp-ad-skip-button-container button",
+    ".ytp-ad-skip-button-slot button",
+    "button.ytp-skip-ad-button", "button.ytp-ad-skip-button-modern",
+    ".videoAdUiSkipButton"
   ].join(",");
-  const OVERLAY_AD_SELECTORS = ".ytp-ad-overlay-close-button,.ytp-ad-overlay-close-container";
+  const OVERLAY_AD_SELECTORS = [
+    ".ytp-ad-overlay-close-button",
+    ".ytp-ad-overlay-close-container button",
+    ".ytp-ad-overlay-close-container"
+  ].join(",");
+  const PREMIUM_DISMISS_SELECTORS = [
+    "ytd-mealbar-promo-renderer #dismiss-button button",
+    "ytd-mealbar-promo-renderer #dismiss-button",
+    "yt-mealbar-promo-renderer #dismiss-button button",
+    "ytd-banner-promo-renderer-background #dismiss-button",
+    "ytd-popup-container ytd-mealbar-promo-renderer button",
+    ".ytp-premium-overlay .ytp-premium-overlay-close-button",
+    ".ytp-ad-overlay-close-button"
+  ].join(",");
   const CAPTION_SELECTORS = ".ytp-caption-segment,.caption-window .ytp-caption-segment,.ytp-caption-window-container .ytp-caption-segment";
   const DEFAULTS = {
     skipAds: true, muteAds: true, speedAds: true, adSpeed: 16,
@@ -19,7 +31,7 @@
   };
 
   let settings = { ...DEFAULTS };
-  let adActive = false, userRate = 1, userMuted = false, userVolume = 1, lastSkipAt = 0;
+  let adActive = false, userRate = 1, userMuted = false, userVolume = 1, lastSkipAt = 0, lastDismissAt = 0, lastPlayNudgeAt = 0;
   let lastSpoken = "", lastCaptionKey = "", pendingCaption = "", captionSettleAt = 0;
   const cache = new Map();
   let overlayEl = null, observer = null, boundVideo = null;
@@ -37,7 +49,7 @@
   function getPlayer() { return document.querySelector("#movie_player") || document.querySelector(".html5-video-player"); }
   function getVideo() {
     const player = getPlayer();
-    if (player) { const v = player.querySelector("video"); if (v) return v; }
+    if (player) { const v = player.querySelector("video.html5-main-video, video"); if (v) return v; }
     return document.querySelector("video.html5-main-video");
   }
   function isVisible(el) {
@@ -48,10 +60,26 @@
     if (Number(style.opacity) === 0) return false;
     return r.width > 1 && r.height > 1;
   }
-  function looksLikeSkip(el) {
+  function nodeText(el) {
+    return ((el.innerText || el.textContent || "") + " " + (el.getAttribute("aria-label") || "") + " " + (el.getAttribute("title") || "")).toLowerCase();
+  }
+  function isPremiumUpsell(el) {
     if (!el) return false;
-    const text = ((el.innerText || el.textContent || "") + " " + (el.getAttribute("aria-label") || "")).toLowerCase();
-    return /skip|رد|عبور|пропуст|saltar|überspring|passer|スキップ|건너뛰/.test(text);
+    const t = nodeText(el);
+    if (/premium|subscribe|trial|upgrade|youtube tv|get premium|try it free|پریمیوم|اشتراک/.test(t)) return true;
+    return !!(el.closest && el.closest("ytd-mealbar-promo-renderer, yt-mealbar-promo-renderer, ytd-premium-intro-renderer, .ytp-premium-overlay"));
+  }
+  function looksLikeSkip(el) {
+    if (!el || isPremiumUpsell(el)) return false;
+    const t = nodeText(el).replace(/\s+/g, " ").trim();
+    if (!t) return false;
+    if (/premium|subscribe|trial|upgrade/.test(t)) return false;
+    return /skip\s*(ad|ads)?\b|رد\s*(کردن|تبلیغ)|عبور|пропуст|saltar|überspring|passer|スキップ|건너뛰/.test(t);
+  }
+  function looksLikeDismiss(el) {
+    if (!el) return false;
+    const t = nodeText(el);
+    return /\bno thanks\b|not now|dismiss|close|نه ممنون|بستن|بند نه|نه مرسی/.test(t);
   }
   function isAdPlaying() {
     const player = getPlayer();
@@ -61,7 +89,7 @@
     if (!el) return;
     try { el.disabled = false; el.removeAttribute("disabled"); el.removeAttribute("aria-disabled"); } catch (_) {}
     const rect = el.getBoundingClientRect();
-    const opts = { bubbles: true, cancelable: true, view: window, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, buttons: 1 };
+    const opts = { bubbles: true, cancelable: true, view: window, clientX: rect.left + Math.max(2, rect.width / 2), clientY: rect.top + Math.max(2, rect.height / 2), buttons: 1 };
     for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
       try { el.dispatchEvent(new PointerEvent(type, { ...opts, pointerId: 1, pointerType: "mouse" })); }
       catch (_) { try { el.dispatchEvent(new MouseEvent(type, opts)); } catch (__) {} }
@@ -71,14 +99,62 @@
   function findSkipButtons() {
     const player = getPlayer() || document;
     const found = new Set();
-    try { player.querySelectorAll(SKIP_SELECTORS).forEach((b) => found.add(b)); } catch (_) {}
-    try { player.querySelectorAll("button, [role='button']").forEach((b) => { if (looksLikeSkip(b)) found.add(b); }); } catch (_) {}
-    return [...found].filter((el) => isVisible(el) || looksLikeSkip(el));
+    try {
+      player.querySelectorAll(SKIP_SELECTORS).forEach((b) => {
+        const btn = b.tagName === "BUTTON" || b.getAttribute("role") === "button" ? b : (b.querySelector("button") || b);
+        if (!isPremiumUpsell(btn)) found.add(btn);
+      });
+    } catch (_) {}
+    try {
+      player.querySelectorAll("button, [role='button']").forEach((b) => {
+        if (looksLikeSkip(b) && !isPremiumUpsell(b)) found.add(b);
+      });
+    } catch (_) {}
+    return [...found].filter((el) => isVisible(el));
+  }
+  function dismissPremiumAndOverlays() {
+    const now = Date.now();
+    if (now - lastDismissAt < 900) return;
+    const nodes = new Set();
+    try { document.querySelectorAll(PREMIUM_DISMISS_SELECTORS).forEach((n) => nodes.add(n)); } catch (_) {}
+    try { document.querySelectorAll(OVERLAY_AD_SELECTORS).forEach((n) => nodes.add(n)); } catch (_) {}
+    document.querySelectorAll("ytd-mealbar-promo-renderer button, yt-mealbar-promo-renderer button").forEach((b) => {
+      if (looksLikeDismiss(b) || /dismiss|no thanks|نه/.test(nodeText(b))) nodes.add(b);
+    });
+    let clicked = false;
+    nodes.forEach((el) => {
+      const target = el.tagName === "BUTTON" || el.getAttribute("role") === "button" ? el : (el.querySelector("button") || el);
+      if (isVisible(target) && !looksLikeSkip(target)) {
+        clickLikeHuman(target);
+        clicked = true;
+      }
+    });
+    if (clicked) lastDismissAt = now;
   }
   function jumpAdToEnd(video) {
     if (!video || !video.duration || !isFinite(video.duration)) return false;
-    try { if (video.duration - video.currentTime > 0.2) { video.currentTime = Math.max(0, video.duration - 0.05); return true; } } catch (_) {}
+    try {
+      if (video.duration - video.currentTime > 0.15) {
+        video.currentTime = Math.max(0, video.duration - 0.05);
+        return true;
+      }
+    } catch (_) {}
     return false;
+  }
+  function clickPlayIfStuck(video) {
+    const now = Date.now();
+    if (now - lastPlayNudgeAt < 700) return;
+    const player = getPlayer();
+    if (!player || isAdPlaying()) return;
+    const pausedUi = player.classList.contains("paused-mode") || player.classList.contains("unstarted-mode");
+    if (video && !video.paused && !pausedUi) return;
+    lastPlayNudgeAt = now;
+    if (video && video.paused) {
+      const p = video.play();
+      if (p && p.catch) p.catch(() => {});
+    }
+    const large = player.querySelector(".ytp-large-play-button, .ytp-play-button");
+    if (large && (pausedUi || (video && video.paused))) clickLikeHuman(large);
   }
   function bindVideo(video) {
     if (!video || video === boundVideo) return;
@@ -89,16 +165,22 @@
     }
     video.addEventListener("ratechange", () => { if (!adActive && video.playbackRate > 0 && video.playbackRate <= 2) userRate = video.playbackRate; });
     video.addEventListener("volumechange", () => { if (!adActive) { userMuted = video.muted; userVolume = video.volume; } });
+    video.addEventListener("ended", () => {
+      if (adActive || isAdPlaying()) return;
+      clickPlayIfStuck(video);
+    });
   }
   function restoreUserPlayback(video) {
     if (!video) return;
     try { video.playbackRate = userRate || 1; } catch (_) {}
-    video.muted = userMuted; video.volume = userVolume;
+    video.muted = userMuted;
+    video.volume = userVolume;
   }
   function handleAds() {
     const video = getVideo();
     if (video) bindVideo(video);
     const playingAd = isAdPlaying();
+    dismissPremiumAndOverlays();
     if (playingAd && !adActive && video) {
       adActive = true;
       if (video.playbackRate && video.playbackRate <= 2) userRate = video.playbackRate;
@@ -108,15 +190,29 @@
     }
     if (playingAd && settings.skipAds) {
       const buttons = findSkipButtons();
-      if (buttons.length && Date.now() - lastSkipAt > 250) {
-        buttons.forEach(clickLikeHuman); jumpAdToEnd(video); lastSkipAt = Date.now();
+      if (buttons.length && Date.now() - lastSkipAt > 700) {
+        clickLikeHuman(buttons[0]);
+        jumpAdToEnd(video);
+        lastSkipAt = Date.now();
         chrome.runtime.sendMessage({ type: "INCREMENT_SKIP" }).catch(() => {});
+      } else if (!buttons.length && video && video.currentTime > 4.8) {
+        jumpAdToEnd(video);
       }
-      document.querySelectorAll(OVERLAY_AD_SELECTORS).forEach((el) => { if (isVisible(el)) clickLikeHuman(el); });
     }
     if (!playingAd) {
-      if (adActive && video) { adActive = false; restoreUserPlayback(video); }
-      else if (video && video.playbackRate > 2) restoreUserPlayback(video);
+      if (adActive && video) {
+        adActive = false;
+        restoreUserPlayback(video);
+        clickPlayIfStuck(video);
+        setTimeout(() => clickPlayIfStuck(getVideo()), 250);
+        setTimeout(() => clickPlayIfStuck(getVideo()), 800);
+      } else if (video && video.playbackRate > 2) {
+        restoreUserPlayback(video);
+        clickPlayIfStuck(video);
+      } else if (video && video.paused) {
+        const player = getPlayer();
+        if (player && player.classList.contains("paused-mode")) clickPlayIfStuck(video);
+      }
     }
   }
 
