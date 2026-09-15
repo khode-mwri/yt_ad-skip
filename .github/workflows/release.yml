@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag like v1.1.2"
+        required: true
+        default: "v1.1.2"
 
 jobs:
   release:
@@ -12,17 +18,25 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build zip
         run: |
-          zip -r yt-farsi-helper-${GITHUB_REF_NAME}.zip . \
+          zip -r yt-farsi-helper-${{ steps.ver.outputs.tag }}.zip . \
             -x ".git/*" ".github/*" "*.zip"
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
           body: |
             زیپ افزونه را دانلود کن، Extract کن، بعد Load unpacked.
             روی خود فایل .zip نزن.
-          files: yt-farsi-helper-${{ github.ref_name }}.zip
+          files: yt-farsi-helper-${{ steps.ver.outputs.tag }}.zip
           generate_release_notes: true
