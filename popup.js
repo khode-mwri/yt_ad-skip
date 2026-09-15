@@ -1,11 +1,11 @@
-const KEYS = ["skipAds","muteAds","speedAds","translateSubs","showOriginal","dubVoice","fontSize","skippedCount","translatorEngine"];
+const KEYS = ["skipAds","muteAds","speedAds","translateSubs","showOriginal","liveDub","fontSize","skippedCount","translatorEngine"];
 const DEFAULTS = {
   skipAds: true,
   muteAds: true,
   speedAds: true,
   translateSubs: true,
   showOriginal: false,
-  dubVoice: false,
+  liveDub: false,
   fontSize: 22,
   skippedCount: 0,
   translatorEngine: "youtube"
@@ -23,9 +23,7 @@ function bind() {
       else if (el.type === "range") {
         el.value = data[key];
         document.getElementById("fontVal").textContent = data[key];
-      } else if (el.tagName === "SELECT") {
-        el.value = data[key] || "youtube";
-      }
+      } else if (el.tagName === "SELECT") el.value = data[key] || "youtube";
     });
   });
   chrome.storage.local.get({ geminiApiKey: "" }, ({ geminiApiKey }) => {
@@ -36,9 +34,10 @@ function bind() {
     const el = document.getElementById(key);
     if (!el || key === "skippedCount") return;
     el.addEventListener("change", () => {
-      let value = el.type === "checkbox" ? el.checked : el.type === "range" ? Number(el.value) : el.value;
+      const value = el.type === "checkbox" ? el.checked : el.type === "range" ? Number(el.value) : el.value;
       chrome.storage.sync.set({ [key]: value });
       if (key === "fontSize") document.getElementById("fontVal").textContent = value;
+      if (key === "liveDub") chrome.runtime.sendMessage({ type: value ? "START_LIVE_DUB" : "STOP_LIVE_DUB" });
     });
     el.addEventListener("input", () => {
       if (el.type === "range") {
